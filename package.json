@@ -1,0 +1,11 @@
+{
+  "name": "hex-postcss",
+  "version": "0.1.0",
+  "main": "index.js",
+  "repository": "https://bitbucket.org/snyder13/hex-postcss",
+  "author": "Steven Snyder <steve@rmer.info>",
+  "license": "MIT",
+  "dependencies": {
+    "postcss": "^7.0.13"
+  }
+}
