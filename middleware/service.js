@@ -1,55 +1,54 @@
 'use strict';
 const fs = require('fs');
 const postcss = require('postcss');
+const mkdirp = require('mkdirp');
 
-module.exports = ({ app, conf }) => {
+module.exports = ({ app, conf, log }) => {
 	const prefix = {
-		'url': conf.get('postcss.prefix.url', '/assets/css'),
-		'local': conf.get('postcss.prefix.local', null)
+		url: conf.get('postcss.prefix.url', '/style'),
+		local: conf.get('postcss.prefix.local', null)
 	};
-	if (!prefix.local) {
-		prefix.local = prefix.url;
+
+	function prefixRelative(path) {
+		return /^\//.test(path) ? path : `${ conf.get('paths.launch') }/${ path }`;
 	}
+
+	Object.keys(prefix).forEach((key) =>
+		prefix[key] = prefixRelative(prefix[key])
+	);
+
 	const pubPaths = conf.get('paths.public');
-	const pcssOpts = conf.getOrCall('postcss.plugins', () => require(`${ conf.get('paths.launch') }/postcss.config.js`).plugins);
+	const destPath = `${ conf.get('paths.launch') }/public${ prefix.url }`;
+	const pcssOpts = conf.getOrCall('postcss.plugins', () =>
+		require(prefixRelative(conf.get('postcss.configPath', 'postcss.config.js'))).plugins
+	);
 	const pcss = postcss(pcssOpts);
 	const isDev = (/^dev/).test(conf.get('env'));
 
-	const cache = {};
-	const get = async (path) => {
-		if (!isDev && cache[path] !== undefined) {
-			return cache[path];
-		}
-		let rv = null;
-		for (let idx = 0; idx < pubPaths.length; ++idx) {
-			const fullPath = `${ pubPaths[idx] }${ path }`;
-			if (await new Promise((resolve) => {
-				fs.access(fullPath, fs.constants.R_OK, (err) =>
-					resolve(!err)
-				);
-			})) {
-				rv = fullPath;
-				break;
-			}
-		}
-		if (rv) {
-			rv = await new Promise((resolve, reject) =>
-				fs.readFile(rv, async (err, css) => {
+	function get(base, name) {
+		const src = `${ base }/${ name }.pcss`;
+		return new Promise((resolve) => {
+			fs.exists(src, (res) => {
+				if (!res) {
+					return resolve();
+				}
+				fs.readFile(src, { encoding: 'utf8' }, async (err, res) => {
 					if (err) {
-						return reject(err);
+						log.error('loading stylesheet', err);
+						return resolve();
 					}
-					resolve((await pcss.process(css, { 'from': rv })).css);
-				})
-			);
-		}
-		if (!isDev) {
-			cache[path] = rv;
-		}
-		return rv;
-	};
+					const { css } = await pcss.process(res, { from: base });
+					if (!isDev) {
+						fs.writeFileSync(`${ destPath }/${ name }.css`, css);
+					}
+					resolve(css);
+				});
+			});
+		});
+	}
 
-	app.get(new RegExp(`${ prefix.url }([-_/a-z]+)[.]css$`, 'i'), async (req, res, next) => {
-		const css = await get(`${ prefix.local }${ req.params[0] }.pcss`);
+	app.get(new RegExp(`${ prefix.url }/([-_/a-z]+)[.]css$`, 'i'), async (req, res, next) => {
+		const css = await get(prefix.local, req.params[0]);
 		if (css) {
 			res.type('css').send(css);
 		}
